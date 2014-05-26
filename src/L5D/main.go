@@ -76,15 +76,17 @@ func (a KeywordsByCount) Len() int           { return len(a) }
 func (a KeywordsByCount) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a KeywordsByCount) Less(i, j int) bool { return a[i].Count > a[j].Count }
 
-func CountKeywords(deck []ootv.DeckItem) []KeywordPair {
+func CountKeywords(deck ootv.DeckType, deckList []ootv.DeckItem) []KeywordPair {
 	keywordCount := make(map[string]int)
 
-	for _, card := range deck {
-		for _, keyword := range card.CardData.Keywords {
-			if keywordCount[keyword] >= 0 {
-				keywordCount[keyword]++
-			} else {
-				keywordCount[keyword] = 1
+	for _, card := range deckList {
+		if card.CardData.Deck == deck {
+			for _, keyword := range card.CardData.Keywords {
+				if keywordCount[keyword] >= 0 {
+					keywordCount[keyword] += card.Count
+				} else {
+					keywordCount[keyword] = card.Count
+				}
 			}
 		}
 	}
@@ -122,7 +124,7 @@ func CalculateFocus(deck []ootv.DeckItem) (average float32, distribution [6]int)
 type DeckGoldCost struct {
 	Deck         ootv.DeckType
 	Average      float32
-	TotalWeight	 int
+	TotalWeight  int
 	CardCount    int
 	Distribution map[int]int
 }
@@ -139,7 +141,7 @@ func CalculateGC(deck []ootv.DeckItem) (output map[ootv.DeckType]DeckGoldCost) {
 			curDeck.Deck = card.CardData.Deck
 			curDeck.Distribution = make(map[int]int)
 		}
-	
+
 		curDeck.CardCount += card.Count
 
 		if card.CardData.GoldCost > 0 {
@@ -164,7 +166,7 @@ func CalculateGP(deck []ootv.DeckItem) (totalGP int, normalizedCost float32, tot
 		}
 	}
 
-	normalizedCost = float32(totalGC)/float32(totalGP)
+	normalizedCost = float32(totalGC) / float32(totalGP)
 	return
 }
 
@@ -178,7 +180,7 @@ func CalculateFGRatio(deck []ootv.DeckItem) (FGRatio float32) {
 		}
 	}
 
-	FGRatio = float32(totalForce)/float32(totalCost)
+	FGRatio = float32(totalForce) / float32(totalCost)
 	return
 }
 
@@ -191,7 +193,6 @@ func main() {
 	deckList := ProcessDecklist(os.Args[1])
 
 	//Process Statistics
-	keywordCount := CountKeywords(deckList)
 	avgFocusValue, dist := CalculateFocus(deckList)
 	goldCosts := CalculateGC(deckList)
 	totalGP, normalizedCost, totalHoldings := CalculateGP(deckList)
@@ -221,13 +222,16 @@ func main() {
 	fmt.Println("-----------")
 	fmt.Println("Average Focus Value: ", avgFocusValue)
 	for i, fv := range dist {
-		fmt.Printf("%d: %v\n", i, strings.Repeat("+", fv))
+		fmt.Printf("\t%d: %v\n", i, strings.Repeat("+", fv))
 	}
 
 	//Output Keywords
 	fmt.Println("-----------")
-	for _, keyword := range keywordCount {
-		fmt.Printf("%v: %d\n", keyword.Keyword, keyword.Count)
+	for _, deck := range []ootv.DeckType{ootv.Dynasty, ootv.Fate} {
+		fmt.Println("Keywords for Deck# ", deck)
+		for _, keyword := range CountKeywords(deck, deckList) {
+			fmt.Printf("\t%v: %d\n", keyword.Keyword, keyword.Count)
+		}
 	}
 
 	/*fmt.Println("-----------")
