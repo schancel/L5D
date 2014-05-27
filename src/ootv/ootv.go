@@ -2,6 +2,7 @@ package ootv
 
 import (
 	"errors"
+	"fmt"
 	"html"
 	"io/ioutil"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type DeckType int
@@ -39,7 +41,7 @@ type Card struct {
 	Set                 []string
 	Legality            []string
 	PersonalHonor       int
-	HonorRequirement    int
+	HonorRequirement    string
 	FlavorText          string
 	Artist              string
 	Rarity              string
@@ -55,8 +57,40 @@ type Card struct {
 	MRP                 string
 }
 
-func GetCardIDs(cardName string, keywords string) (cardIDs []string) {
+func cardIDsFromPage(rawData string) []string {
 	var cardidRegexp string = "cardid=(\\d+)"
+
+	var cardIDs = make(map[string]bool)
+
+	re := regexp.MustCompile(cardidRegexp)
+
+	for _, results := range re.FindAllStringSubmatch(rawData, -1) {
+		//fmt.Println(results)
+		cardIDs[results[1]] = true
+	}
+
+	var cardIDlist = make([]string, 0, 100)
+
+	for key, _ := range cardIDs {
+		//fmt.Println(key, value)
+		cardIDlist = append(cardIDlist, strings.TrimSpace(key))
+	}
+	//fmt.Println(cardIDlist)
+	return cardIDlist
+}
+
+func searchForCardsString(searchFields url.Values) string {
+	resp, err := http.PostForm("http://ia.alderac.com/oracle/dosearch", searchFields)
+
+	if nil != err {
+		panic("Failed to retrieve card id")
+	}
+
+	byteData, err := ioutil.ReadAll(resp.Body)
+	return string(byteData[:])
+}
+
+func GetCardIDs(cardName string, keywords string) (cardIDs []string) {
 
 	postData := url.Values{"search_13": []string{html.EscapeString(cardName)}}
 
@@ -66,24 +100,37 @@ func GetCardIDs(cardName string, keywords string) (cardIDs []string) {
 		postData.Add("search_7", keywords)
 	}
 
-	resp, err := http.PostForm("http://ia.alderac.com/oracle/dosearch", postData)
+	results := searchForCardsString(postData)
 
-	if nil != err {
-		panic("Failed to retrieve card id")
-	}
+	return cardIDsFromPage(results)
+}
 
-	byteData, err := ioutil.ReadAll(resp.Body)
-	findResults := string(byteData[:])
+func GetAllCardIDs(legality string) []string {
+	var pages, curPage int = 0, 0
 
-	re := regexp.MustCompile(cardidRegexp)
+	var cardIDs = make([]string, 0, 2000)
 
-	for _, results := range re.FindAllStringSubmatch(findResults, -1) {
-		if len(cardIDs) == 0 || cardIDs[len(cardIDs)-1] != results[1] { //If there is more than one card, they get duplicated because of the image tag.
-			cardIDs = append(cardIDs, results[1])
+	rawData := searchForCardsString(url.Values{"search_sel_10[]": {html.EscapeString(legality)}})
+
+	var extractPagesExp = "of (\\d+)"
+	var extractPages = regexp.MustCompile(extractPagesExp)
+
+	res := extractPages.FindStringSubmatch(rawData)
+	pages, _ = strconv.Atoi(strings.TrimSpace(res[1]))
+
+	for curPage = 1; curPage <= pages; curPage++ {
+		if curPage > 1 { //We already have the data for the first page
+			rawData = searchForCardsString(url.Values{"search_sel_10[]": {html.EscapeString(legality)}, "page": {strconv.Itoa(curPage)}})
 		}
+		cardIDsPage := cardIDsFromPage(rawData)
+		fmt.Println(len(cardIDsPage))
+		cardIDs = append(cardIDs, cardIDsPage...)
+		//fmt.Println(cardIDs)
+
+		time.Sleep(1000)
 	}
 
-	return
+	return cardIDs
 }
 
 func GetCardByExactName(cardName string) (Card, error) {
@@ -163,7 +210,7 @@ func GetCardData(cardid string) Card {
 			value := []string{stripHtml.ReplaceAllString(html.UnescapeString(rawValue), "")}
 			switch key {
 			case "Printed Text":
-				cardData.CardText = value[0]
+				cardData.CardText = strings.Replace(strings.Replace(value[0], "\n", " ", -1), "\r", " ", -1)
 				if extractGoldPD.MatchString(cardData.CardText) {
 					res := extractGoldPD.FindStringSubmatch(cardData.CardText)
 					cardData.GoldProduction, _ = strconv.Atoi(strings.TrimSpace(res[1]))
@@ -186,7 +233,7 @@ func GetCardData(cardid string) Card {
 			case "<span title=\"Honor Requirement, Gold Cost, Personal Honor\">Printed HR/GC/PH</span>":
 				results := extractTd.FindAllStringSubmatch(rawValue, -1)
 				if len(results) >= 3 {
-					cardData.HonorRequirement, _ = strconv.Atoi(strings.TrimSpace(results[0][1]))
+					cardData.HonorRequirement = strings.TrimSpace(results[0][1])
 					cardData.GoldCost, _ = strconv.Atoi(strings.TrimSpace(results[1][1]))
 					cardData.PersonalHonor, _ = strconv.Atoi(strings.TrimSpace(results[2][1]))
 				}
