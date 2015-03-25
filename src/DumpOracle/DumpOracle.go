@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
+	//"time"
 )
 
 func main() {
@@ -19,7 +19,7 @@ func main() {
 		panic(err)
 	}
 
-	cardIDs := ootv.GetAllCardIDs("Ivory Edition")
+	cardIDs := ootv.GetAllCardIDs("Ivory Edition Part 2")
 
 	defer outputFile.Close()
 
@@ -29,31 +29,47 @@ func main() {
 
 	csvWriter.Write([]string{"Type", "Clan", "Deck", "Title", "GoldCost", "GoldProduction", "Force", "Chi", "FocusValue", "PersonalHonor", "HonorRequirement", "Keywords", "CardText"})
 
-	var outputChan = make(chan ootv.Card, 2000)
+	var outputChan = make(chan ootv.Card)
+	var cardIDChan = make(chan string)
 	var wg sync.WaitGroup
 
 	go func(in chan ootv.Card) {
 		for cardData := range in {
-			csvWriter.Write([]string{cardData.Type, cardData.Clan, strconv.Itoa(int(cardData.Deck)), cardData.Title, strconv.Itoa(cardData.GoldCost), strconv.Itoa(cardData.GoldProduction), strconv.Itoa(cardData.Force), strconv.Itoa(cardData.Chi), strconv.Itoa(cardData.FocusValue), strconv.Itoa(cardData.PersonalHonor), cardData.HonorRequirement, strings.Join(cardData.Keywords, ","), cardData.CardText})
+			csvWriter.Write([]string{cardData.Type,
+				cardData.Clan,
+				strconv.Itoa(int(cardData.Deck)),
+				cardData.Title,
+				strconv.Itoa(cardData.GoldCost),
+				strconv.Itoa(cardData.GoldProduction),
+				strconv.Itoa(cardData.Force),
+				strconv.Itoa(cardData.Chi),
+				strconv.Itoa(cardData.FocusValue),
+				strconv.Itoa(cardData.PersonalHonor),
+				cardData.HonorRequirement,
+				strings.Join(cardData.Keywords, ","), cardData.CardText})
 		}
 	}(outputChan)
 
-	for i, cardID := range cardIDs {
-		if i%50 == 0 {
-			fmt.Println("Processing result:", i)
-			wg.Wait()
-			fmt.Println("Done waiting.")
-			time.Sleep(1000)
-		}
+	for i := 0; i < 10; i++ {
+		go func(in chan string, out chan ootv.Card) {
+			wg.Add(1)
 
-		wg.Add(1)
-		go func(id string, out chan ootv.Card) {
-			cardData := ootv.GetCardData(id)
-			out <- cardData
+			for cId := range in {
+				cardData := ootv.GetCardData(cId)
+				out <- cardData
+			}
 			wg.Done()
-		}(cardID, outputChan)
+		}(cardIDChan, outputChan)
 	}
 
-	fmt.Println("Ended")
+	for _, cardID := range cardIDs {
+		println(cardID)
+		cardIDChan <- cardID
+	}
+
+	close(cardIDChan)
 	wg.Wait()
+	close(outputChan)
+
+	fmt.Println("Ended")
 }
